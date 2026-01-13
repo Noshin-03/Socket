@@ -1,39 +1,67 @@
 const express = require('express');
-const { createServer } = require('node:http');
-const { join } = require('node:path');
+const { createServer } = require('http');
+const { join } = require('path');
 const { Server } = require('socket.io');
 
 const app = express();
 const server = createServer(app);
-const io = new Server(server);
+
+const io = new Server(server, {
+  connectionStateRecovery: {}
+});
+
+app.use(express.static(__dirname));
 
 app.get('/', (req, res) => {
   res.sendFile(join(__dirname, 'index.html'));
 });
 
-io.on('connection', (socket) => {
-  console.log('a user connected');
-});
+let userCount = 0;
 
 io.on('connection', (socket) => {
-  console.log('a user connected');
+
+  console.log(
+    socket.recovered ? 'Connection recovered:' : 'New connection:',
+    socket.id
+  );
+
+  socket.on('set username', (username) => {
+
+    if (!socket.recovered) {
+      userCount++;
+    }
+
+    socket.username = username;
+
+    socket.broadcast.emit('chat message', {
+      type: 'system',
+      message: `${username} joined the chat`,
+      count: userCount
+    });
+  });
+
+  socket.on('chat message', (msg) => {
+    io.emit('chat message', {
+      type: 'user',
+      username: socket.username || 'Anonymous',
+      message: msg
+    });
+  });
+
   socket.on('disconnect', () => {
-    console.log('user disconnected');
+    if (!socket.recovered && socket.username) {
+      userCount--;
+
+      socket.broadcast.emit('chat message', {
+        type: 'system',
+        message: `${socket.username} left the chat`,
+        count: userCount
+      });
+    }
   });
 });
 
-io.on('connection', (socket) => {
-  socket.on('chat message', (msg) => {
-    console.log('message: ' + msg);
-  });
-});
-
-io.on('connection', (socket) => {
-  socket.on('chat message', (msg) => {
-    io.emit('chat message', msg);
-  });
-});
 
 server.listen(3000, () => {
-  console.log('server running at http://localhost:3000');
+  console.log('Server running at http://localhost:3000');
 });
